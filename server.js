@@ -9,6 +9,17 @@ const menuRoutes = require('./routes/menu');
 const orderRoutes = require('./routes/orders');
 
 const app = express();
+const bcrypt = require('bcryptjs');
+const { createAdmin, findAdminByUsername } = require('./db');
+
+async function ensureAdmin() {
+  if (!findAdminByUsername('admin')) {
+    const passwordHash = await bcrypt.hash('changeme123', 10);
+    createAdmin({ username: 'admin', passwordHash });
+    console.log('Default admin created');
+  }
+}
+ensureAdmin();
 const PORT = process.env.PORT || 4100;
 
 app.use(cors({
