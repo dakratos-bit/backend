@@ -22,7 +22,7 @@ router.post('/login', async (req, res) => {
   const token = jwt.sign({ sub: admin.id }, JWT_SECRET, { expiresIn: '12h' });
   res.cookie('eatery_admin_session', token, {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: 'none',
     secure: process.env.NODE_ENV === 'production',
     maxAge: COOKIE_MAX_AGE,
   });
