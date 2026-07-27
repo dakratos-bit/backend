@@ -49,9 +49,12 @@ async function ensureTables() {
     );
   `);
 }
-ensureTables()
+const dbReady = ensureTables()
   .then(() => console.log('Database tables ready'))
-  .catch(err => console.error('Failed to set up tables:', err.message));
+  .catch(err => {
+    console.error('Failed to set up tables:', err.message);
+    throw err;
+  });
 
 // ── Helpers to convert DB rows back to the same shape the app expects ──
 function mapMenuItem(row) {
@@ -199,6 +202,7 @@ async function createAdmin({ username, passwordHash }) {
 }
 
 module.exports = {
+  dbReady,
   getMenu, createMenuItem, updateMenuItem, deleteMenuItem,
   getOrders, createOrder, updateOrderStatus,
   findAdminByUsername, findAdminById, createAdmin,
