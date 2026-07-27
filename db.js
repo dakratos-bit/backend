@@ -1,108 +1,107 @@
-const fs = require('fs');
-const path = require('path');
+const mongoose = require('mongoose');
 
-const DB_FILE = path.join(__dirname, 'data', 'store.json');
-
-function ensureDb() {
-  const dir = path.dirname(DB_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ menuItems: [], orders: [], admins: [] }, null, 2));
-  }
-}
-
-function readDb() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-}
-
-function writeDb(data) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
+// ── Connect ──
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
 function genId(prefix) {
   return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// ── Menu ──
-function getMenu() { return readDb().menuItems; }
+// ── Schemas ──
+const menuItemSchema = new mongoose.Schema({
+  id: { type: String, unique: true, default: () => genId('item') },
+  name: String,
+  description: String,
+  category: String,
+  price: { type: Number, default: null },
+  variants: { type: Array, default: null },
+  available: { type: Boolean, default: true },
+  imageUrl: { type: String, default: null },
+  createdAt: { type: String, default: () => new Date().toISOString() },
+});
 
-function createMenuItem({ name, description, price, category, available, imageUrl, variants }) {
-  const db = readDb();
-  const item = {
-    id: genId('item'),
+const orderSchema = new mongoose.Schema({
+  id: { type: String, unique: true, default: () => genId('order') },
+  customerName: String,
+  phone: String,
+  email: { type: String, default: null },
+  fulfillment: String,
+  address: String,
+  items: Array,
+  total: Number,
+  status: { type: String, default: 'pending' },
+  createdAt: { type: String, default: () => new Date().toISOString() },
+});
+
+const adminSchema = new mongoose.Schema({
+  id: { type: String, unique: true, default: () => genId('admin') },
+  username: String,
+  passwordHash: String,
+  createdAt: { type: String, default: () => new Date().toISOString() },
+});
+
+const MenuItem = mongoose.model('MenuItem', menuItemSchema);
+const Order = mongoose.model('Order', orderSchema);
+const Admin = mongoose.model('Admin', adminSchema);
+
+// ── Menu ──
+async function getMenu() {
+  return await MenuItem.find().lean();
+}
+
+async function createMenuItem({ name, description, price, category, available, imageUrl, variants }) {
+  const item = await MenuItem.create({
     name, description, category,
-    price: price !== undefined ? price : null,       // flat price — used by simple items
-    variants: variants && variants.length ? variants : null, // [{label, price}] — used by size-based items like Banana Bread
+    price: price !== undefined ? price : null,
+    variants: variants && variants.length ? variants : null,
     available: available !== false,
     imageUrl: imageUrl || null,
-    createdAt: new Date().toISOString(),
-  };
-  db.menuItems.push(item);
-  writeDb(db);
-  return item;
+  });
+  return item.toObject();
 }
 
-function updateMenuItem(id, updates) {
-  const db = readDb();
-  const idx = db.menuItems.findIndex(i => i.id === id);
-  if (idx === -1) return null;
-  db.menuItems[idx] = { ...db.menuItems[idx], ...updates };
-  writeDb(db);
-  return db.menuItems[idx];
+async function updateMenuItem(id, updates) {
+  const item = await MenuItem.findOneAndUpdate({ id }, updates, { new: true }).lean();
+  return item || null;
 }
 
-function deleteMenuItem(id) {
-  const db = readDb();
-  const before = db.menuItems.length;
-  db.menuItems = db.menuItems.filter(i => i.id !== id);
-  writeDb(db);
-  return db.menuItems.length < before;
+async function deleteMenuItem(id) {
+  const res = await MenuItem.deleteOne({ id });
+  return res.deletedCount > 0;
 }
 
 // ── Orders ──
-function getOrders() { return readDb().orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); }
-
-function createOrder({ customerName, phone, email, fulfillment, address, items, total }) {
-  const db = readDb();
-  const order = {
-    id: genId('order'),
-    customerName, phone, email: email || null, fulfillment, address,
-    items, total,
-    status: 'pending', // pending -> preparing -> ready -> completed (or cancelled)
-    createdAt: new Date().toISOString(),
-  };
-  db.orders.push(order);
-  writeDb(db);
-  return order;
+async function getOrders() {
+  return await Order.find().sort({ createdAt: -1 }).lean();
 }
 
-function updateOrderStatus(id, status) {
-  const db = readDb();
-  const idx = db.orders.findIndex(o => o.id === id);
-  if (idx === -1) return null;
-  db.orders[idx].status = status;
-  writeDb(db);
-  return db.orders[idx];
+async function createOrder({ customerName, phone, email, fulfillment, address, items, total }) {
+  const order = await Order.create({
+    customerName, phone, email: email || null, fulfillment, address,
+    items, total, status: 'pending',
+  });
+  return order.toObject();
+}
+
+async function updateOrderStatus(id, status) {
+  const order = await Order.findOneAndUpdate({ id }, { status }, { new: true }).lean();
+  return order || null;
 }
 
 // ── Admins ──
-function findAdminByUsername(username) {
-  const db = readDb();
-  return db.admins.find(a => a.username.toLowerCase() === (username || '').toLowerCase());
+async function findAdminByUsername(username) {
+  return await Admin.findOne({ username: new RegExp(`^${username || ''}$`, 'i') }).lean();
 }
 
-function findAdminById(id) {
-  const db = readDb();
-  return db.admins.find(a => a.id === id);
+async function findAdminById(id) {
+  return await Admin.findOne({ id }).lean();
 }
 
-function createAdmin({ username, passwordHash }) {
-  const db = readDb();
-  const admin = { id: genId('admin'), username, passwordHash, createdAt: new Date().toISOString() };
-  db.admins.push(admin);
-  writeDb(db);
-  return admin;
+async function createAdmin({ username, passwordHash }) {
+  const admin = await Admin.create({ username, passwordHash });
+  return admin.toObject();
 }
 
 module.exports = {
