@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { Pool } = require('pg');
 
 // ── Connect ──
 mongoose.connect(process.env.MONGO_URI)
