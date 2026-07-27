@@ -5,7 +5,7 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
-const { findAdminByUsername, createAdmin } = require('./db');
+const { dbReady, findAdminByUsername, createAdmin } = require('./db');
 
 const adminAuthRoutes = require('./routes/adminAuth');
 const menuRoutes = require('./routes/menu');
@@ -35,6 +35,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 // does nothing once an "admin" account already exists in the database.
 async function ensureAdmin() {
   try {
+    await dbReady;
     const existing = await findAdminByUsername('admin');
     if (!existing) {
       const passwordHash = await bcrypt.hash('changeme123', 10);
