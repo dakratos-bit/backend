@@ -4,7 +4,12 @@ const { findAdminById } = require('../db');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-this-in-production';
 
 async function requireAdmin(req, res, next) {
-  const token = req.cookies.eatery_admin_session;
+  // Reads the token from the Authorization header instead of a cookie, e.g.:
+  //   Authorization: Bearer <token>
+  // This avoids Safari/iOS blocking cross-site cookies.
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
   if (!token) return res.status(401).json({ error: 'Admin login required.' });
 
   try {
