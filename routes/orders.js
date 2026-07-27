@@ -18,7 +18,7 @@ router.post('/orders', async (req, res) => {
   if (fulfillment === 'delivery' && (!address || !address.trim())) return res.status(400).json({ error: 'Delivery address is required.' });
   if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Your cart is empty.' });
 
-  const menu = getMenu();
+  const menu = await getMenu();
   let total = 0;
   const resolvedItems = [];
 
@@ -45,7 +45,7 @@ router.post('/orders', async (req, res) => {
     resolvedItems.push({ menuItemId: menuItem.id, name: displayName, price: unitPrice, qty });
   }
 
-  const order = createOrder({
+  const order = await createOrder({
     customerName: customerName.trim(),
     phone: phone.trim(),
     email: email ? email.trim() : null,
@@ -67,8 +67,8 @@ router.post('/orders', async (req, res) => {
 });
 
 // GET /api/admin/orders — admin order list
-router.get('/admin/orders', requireAdmin, (req, res) => {
-  res.json({ orders: getOrders() });
+router.get('/admin/orders', requireAdmin, async (req, res) => {
+  res.json({ orders: await getOrders() });
 });
 
 // PATCH /api/admin/orders/:id/status
@@ -77,7 +77,7 @@ router.patch('/admin/orders/:id/status', requireAdmin, async (req, res) => {
   if (!VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Invalid status. Use: ' + VALID_STATUSES.join(', ') });
   }
-  const order = updateOrderStatus(req.params.id, status);
+  const order = await updateOrderStatus(req.params.id, status);
   if (!order) return res.status(404).json({ error: 'Order not found.' });
 
   if (status === 'completed') {
@@ -92,8 +92,8 @@ router.patch('/admin/orders/:id/status', requireAdmin, async (req, res) => {
 });
 
 // GET /api/admin/stats — basic sales stats
-router.get('/admin/stats', requireAdmin, (req, res) => {
-  const orders = getOrders();
+router.get('/admin/stats', requireAdmin, async (req, res) => {
+  const orders = await getOrders();
   const completed = orders.filter(o => o.status !== 'cancelled');
 
   const todayStr = new Date().toDateString();
@@ -122,8 +122,8 @@ router.get('/admin/stats', requireAdmin, (req, res) => {
 });
 
 // GET /api/admin/customers — aggregates orders by phone number to surface repeat customers
-router.get('/admin/customers', requireAdmin, (req, res) => {
-  const orders = getOrders(); // already sorted newest-first
+router.get('/admin/customers', requireAdmin, async (req, res) => {
+  const orders = await getOrders(); // already sorted newest-first
   const map = {};
 
   orders.forEach(o => {
@@ -149,13 +149,14 @@ router.get('/admin/customers', requireAdmin, (req, res) => {
 // GET /api/orders/track — public order lookup for customers.
 // Requires both the order ID and the phone used at checkout, so a guessed
 // or leaked order ID alone isn't enough to see someone else's order.
-router.get('/orders/track', (req, res) => {
+router.get('/orders/track', async (req, res) => {
   const { orderId, phone } = req.query;
   if (!orderId || !phone) {
     return res.status(400).json({ error: 'Enter your order ID and phone number.' });
   }
   const normalizedPhone = phone.replace(/\D/g, '');
-  const order = getOrders().find(o =>
+  const orders = await getOrders();
+  const order = orders.find(o =>
     o.id === orderId.trim() && o.phone.replace(/\D/g, '').endsWith(normalizedPhone.slice(-10))
   );
   if (!order) {

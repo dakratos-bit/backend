@@ -13,7 +13,7 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required.' });
   }
 
-  const admin = findAdminByUsername(username);
+  const admin = await findAdminByUsername(username);
   if (!admin) return res.status(401).json({ error: 'Incorrect username or password.' });
 
   const match = await bcrypt.compare(password, admin.passwordHash);

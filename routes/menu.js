@@ -29,8 +29,8 @@ const upload = multer({
 });
 
 // GET /api/menu — public, anyone browsing the site
-router.get('/menu', (req, res) => {
-  res.json({ items: getMenu() });
+router.get('/menu', async (req, res) => {
+  res.json({ items: await getMenu() });
 });
 
 // POST /api/admin/menu — create a new item, with an optional photo.
@@ -40,7 +40,7 @@ router.post('/admin/menu', requireAdmin, (req, res, next) => {
     if (err) return res.status(400).json({ error: err.message });
     next();
   });
-}, (req, res) => {
+}, async (req, res) => {
   const { name, description, price, category, available } = req.body;
   const priceNum = parseFloat(price);
 
@@ -50,7 +50,7 @@ router.post('/admin/menu', requireAdmin, (req, res, next) => {
 
   const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
-  const item = createMenuItem({
+  const item = await createMenuItem({
     name: name.trim(),
     description: (description || '').trim(),
     price: priceNum,
@@ -70,7 +70,7 @@ router.post('/admin/menu/banana-bread', requireAdmin, (req, res, next) => {
     if (err) return res.status(400).json({ error: err.message });
     next();
   });
-}, (req, res) => {
+}, async (req, res) => {
   const { name, description, sixInOne, big, medium, small, available } = req.body;
 
   if (!name || !name.trim()) return res.status(400).json({ error: 'Topping name is required.' });
@@ -87,7 +87,7 @@ router.post('/admin/menu/banana-bread', requireAdmin, (req, res, next) => {
 
   const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
-  const item = createMenuItem({
+  const item = await createMenuItem({
     name: name.trim(),
     description: (description || '').trim(),
     category: 'Banana Bread',
@@ -101,7 +101,7 @@ router.post('/admin/menu/banana-bread', requireAdmin, (req, res, next) => {
 
 // PUT /api/admin/menu/:id — edit an item's fields (JSON body — used for the
 // availability toggle in the dashboard; doesn't currently handle photo changes)
-router.put('/admin/menu/:id', requireAdmin, (req, res) => {
+router.put('/admin/menu/:id', requireAdmin, async (req, res) => {
   const { name, description, price, category, available } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name.trim();
@@ -110,14 +110,14 @@ router.put('/admin/menu/:id', requireAdmin, (req, res) => {
   if (category !== undefined) updates.category = category.trim();
   if (available !== undefined) updates.available = available;
 
-  const item = updateMenuItem(req.params.id, updates);
+  const item = await updateMenuItem(req.params.id, updates);
   if (!item) return res.status(404).json({ error: 'Menu item not found.' });
   res.json({ item });
 });
 
 // DELETE /api/admin/menu/:id
-router.delete('/admin/menu/:id', requireAdmin, (req, res) => {
-  const ok = deleteMenuItem(req.params.id);
+router.delete('/admin/menu/:id', requireAdmin, async (req, res) => {
+  const ok = await deleteMenuItem(req.params.id);
   if (!ok) return res.status(404).json({ error: 'Menu item not found.' });
   res.json({ ok: true });
 });
