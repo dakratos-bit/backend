@@ -5,7 +5,6 @@ const { findAdminByUsername } = require('../db');
 const { requireAdmin, JWT_SECRET } = require('../middleware/requireAdmin');
 
 const router = express.Router();
-const COOKIE_MAX_AGE = 12 * 60 * 60 * 1000; // 12 hours — shorter than customer sessions on purpose
 
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
@@ -20,17 +19,17 @@ router.post('/login', async (req, res) => {
   if (!match) return res.status(401).json({ error: 'Incorrect username or password.' });
 
   const token = jwt.sign({ sub: admin.id }, JWT_SECRET, { expiresIn: '12h' });
-  res.cookie('eatery_admin_session', token, {
-    httpOnly: true,
-    sameSite: 'none',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: COOKIE_MAX_AGE,
-  });
-  res.json({ admin: { id: admin.id, username: admin.username } });
+
+  // Token is returned in the response body instead of a cookie. The frontend
+  // saves this to localStorage and sends it back manually as an Authorization
+  // header on every request -- this sidesteps Safari/iOS blocking cross-site
+  // cookies, which was breaking admin login on iPhone.
+  res.json({ admin: { id: admin.id, username: admin.username }, token });
 });
 
 router.post('/logout', (req, res) => {
-  res.clearCookie('eatery_admin_session');
+  // Nothing to clear server-side since there's no cookie/session store --
+  // the frontend just deletes the token from localStorage.
   res.json({ ok: true });
 });
 
