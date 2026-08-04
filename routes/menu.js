@@ -99,16 +99,43 @@ router.post('/admin/menu/banana-bread', requireAdmin, (req, res, next) => {
   res.status(201).json({ item });
 });
 
-// PUT /api/admin/menu/:id — edit an item's fields (JSON body — used for the
-// availability toggle in the dashboard; doesn't currently handle photo changes)
-router.put('/admin/menu/:id', requireAdmin, async (req, res) => {
-  const { name, description, price, category, available } = req.body;
+// PUT /api/admin/menu/:id — edit an item's fields. Accepts either a plain JSON
+// body (used by the availability toggle) or multipart/form-data with an
+// optional new photo (used by the full edit modal). Multer only kicks in
+// when the request is actually multipart, so JSON requests pass through
+// untouched.
+router.put('/admin/menu/:id', requireAdmin, (req, res, next) => {
+  upload.single('image')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}, async (req, res) => {
+  const { name, description, price, category, available, sixInOne, big, medium, small } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name.trim();
   if (description !== undefined) updates.description = description.trim();
-  if (price !== undefined) updates.price = price;
   if (category !== undefined) updates.category = category.trim();
-  if (available !== undefined) updates.available = available;
+  if (available !== undefined) updates.available = available === 'true' || available === true;
+
+  // Size-based item (Banana Bread toppings): rebuild the variants array from
+  // whichever size fields were sent, same rule as the create route — a blank
+  // size means it's not offered.
+  if (sixInOne !== undefined || big !== undefined || medium !== undefined || small !== undefined) {
+    const variants = [];
+    if (sixInOne && parseFloat(sixInOne) > 0) variants.push({ label: '6-in-1 Mini Loaves', price: parseFloat(sixInOne) });
+    if (big && parseFloat(big) > 0) variants.push({ label: 'Big', price: parseFloat(big) });
+    if (medium && parseFloat(medium) > 0) variants.push({ label: 'Medium', price: parseFloat(medium) });
+    if (small && parseFloat(small) > 0) variants.push({ label: 'Small', price: parseFloat(small) });
+    if (variants.length === 0) return res.status(400).json({ error: 'Enter a price for at least one size.' });
+    updates.variants = variants;
+    updates.price = null;
+  } else if (price !== undefined) {
+    const priceNum = parseFloat(price);
+    if (!priceNum || priceNum <= 0) return res.status(400).json({ error: 'Enter a valid price.' });
+    updates.price = priceNum;
+  }
+
+  if (req.file) updates.imageUrl = `/uploads/${req.file.filename}`;
 
   const item = await updateMenuItem(req.params.id, updates);
   if (!item) return res.status(404).json({ error: 'Menu item not found.' });
