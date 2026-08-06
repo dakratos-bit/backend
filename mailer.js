@@ -1,23 +1,36 @@
-const nodemailer = require('nodemailer');
-
-let transporter = null;
-
-function getTransporter() {
-  if (transporter) return transporter;
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    return null; // not configured — emails will be skipped, not crash the app
-  }
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
-  return transporter;
-}
+// Emails are sent via Brevo's HTTP API instead of Gmail/SMTP. Render's free
+// tier blocks outbound traffic on SMTP ports (25, 465, 587) as of Sept 2025,
+// so nodemailer + Gmail cannot work here regardless of credentials. Brevo's
+// API runs over normal HTTPS, which isn't blocked.
 
 const BRAND_NAME = 'The Baker NG';
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+
+function isConfigured() {
+  return !!(process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL);
+}
+
+async function sendViaBrevo({ to, subject, html }) {
+  const res = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'api-key': process.env.BREVO_API_KEY,
+    },
+    body: JSON.stringify({
+      sender: { name: BRAND_NAME, email: process.env.BREVO_SENDER_EMAIL },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Brevo send failed (${res.status}): ${body}`);
+  }
+}
 
 function orderItemsHtml(order) {
   return order.items.map(i => `<li>${i.qty}x ${i.name} — ₦${(i.price * i.qty).toLocaleString('en-NG')}</li>`).join('');
@@ -25,11 +38,9 @@ function orderItemsHtml(order) {
 
 // Sent the moment a customer places an order (if they gave an email).
 async function sendOrderConfirmation(order) {
-  const t = getTransporter();
-  if (!t || !order.email) return; // silently skip — never blocks order placement
+  if (!isConfigured() || !order.email) return; // silently skip — never blocks order placement
 
-  await t.sendMail({
-    from: `"${BRAND_NAME}" <${process.env.GMAIL_USER}>`,
+  await sendViaBrevo({
     to: order.email,
     subject: `Order confirmed — ${order.id}`,
     html: `
@@ -51,11 +62,9 @@ async function sendOrderConfirmation(order) {
 
 // Sent when an admin marks the order as completed.
 async function sendOrderCompleted(order) {
-  const t = getTransporter();
-  if (!t || !order.email) return;
+  if (!isConfigured() || !order.email) return;
 
-  await t.sendMail({
-    from: `"${BRAND_NAME}" <${process.env.GMAIL_USER}>`,
+  await sendViaBrevo({
     to: order.email,
     subject: `Your order is ready! — ${order.id}`,
     html: `
