@@ -9,6 +9,13 @@ function genId(prefix) {
   return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// Order tracking IDs are shown to customers, so they're kept short and
+// numeric (8 digits) rather than the longer prefixed IDs used internally
+// for menu items and admins.
+function genOrderId() {
+  return String(Math.floor(10000000 + Math.random() * 90000000));
+}
+
 // ── Create tables if they don't exist yet ──
 async function ensureTables() {
   await pool.query(`
@@ -159,20 +166,41 @@ async function getOrders() {
 }
 
 async function createOrder({ customerName, phone, email, fulfillment, address, items, total }) {
-  const id = genId('order');
   const createdAt = new Date().toISOString();
-  const { rows } = await pool.query(
-    `INSERT INTO orders (id, customer_name, phone, email, fulfillment, address, items, total, status, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [id, customerName, phone, email || null, fulfillment, address, JSON.stringify(items), total, 'pending', createdAt]
-  );
-  return mapOrder(rows[0]);
+
+  // Extremely unlikely to collide with 8 digits, but retries a few times
+  // just in case rather than letting the insert fail outright.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const id = genOrderId();
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO orders (id, customer_name, phone, email, fulfillment, address, items, total, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        [id, customerName, phone, email || null, fulfillment, address, JSON.stringify(items), total, 'pending', createdAt]
+      );
+      return mapOrder(rows[0]);
+    } catch (err) {
+      if (err.code === '23505' && attempt < 4) continue; // unique_violation — try a new id
+      throw err;
+    }
+  }
 }
 
 async function updateOrderStatus(id, status) {
   const { rows } = await pool.query(
     'UPDATE orders SET status = $1 WHERE id = $2 RETURNING *',
     [status, id]
+  );
+  return mapOrder(rows[0]) || null;
+}
+
+async function updateOrder(id, { customerName, phone, email, fulfillment, address, items, total }) {
+  const { rows } = await pool.query(
+    `UPDATE orders SET
+       customer_name = $1, phone = $2, email = $3, fulfillment = $4,
+       address = $5, items = $6, total = $7
+     WHERE id = $8 RETURNING *`,
+    [customerName, phone, email || null, fulfillment, address || null, JSON.stringify(items), total, id]
   );
   return mapOrder(rows[0]) || null;
 }
@@ -201,9 +229,25 @@ async function createAdmin({ username, passwordHash }) {
   return mapAdmin(rows[0]);
 }
 
+async function updateAdmin(id, { username, passwordHash }) {
+  const setParts = [];
+  const values = [];
+  let i = 1;
+  if (username !== undefined) { setParts.push(`username = $${i}`); values.push(username); i++; }
+  if (passwordHash !== undefined) { setParts.push(`password_hash = $${i}`); values.push(passwordHash); i++; }
+  if (setParts.length === 0) return await findAdminById(id);
+
+  values.push(id);
+  const { rows } = await pool.query(
+    `UPDATE admins SET ${setParts.join(', ')} WHERE id = $${i} RETURNING *`,
+    values
+  );
+  return mapAdmin(rows[0]) || null;
+}
+
 module.exports = {
   dbReady,
   getMenu, createMenuItem, updateMenuItem, deleteMenuItem,
-  getOrders, createOrder, updateOrderStatus,
-  findAdminByUsername, findAdminById, createAdmin,
+  getOrders, createOrder, updateOrderStatus, updateOrder,
+  findAdminByUsername, findAdminById, createAdmin, updateAdmin,
 };
