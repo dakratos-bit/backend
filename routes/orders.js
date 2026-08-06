@@ -170,6 +170,7 @@ router.get('/admin/customers', requireAdmin, async (req, res) => {
         orderCount: 0,
         totalSpent: 0,
         lastOrderAt: o.createdAt,
+        lastOrderId: o.id,
       };
     }
     const c = map[o.phone];
@@ -197,6 +198,7 @@ router.get('/admin/customers/export', requireAdmin, async (req, res) => {
         orderCount: 0,
         totalSpent: 0,
         lastOrderAt: o.createdAt,
+        lastOrderId: o.id,
       };
     }
     const c = map[o.phone];
@@ -211,12 +213,12 @@ router.get('/admin/customers/export', requireAdmin, async (req, res) => {
 
   let sql = `-- The Baker NG — customers export\n-- Generated: ${new Date().toISOString()}\n\n`;
   sql += `CREATE TABLE IF NOT EXISTS customers_export (\n`;
-  sql += `  phone TEXT,\n  name TEXT,\n  order_count INTEGER,\n  total_spent NUMERIC,\n  last_order_at TIMESTAMPTZ\n);\n\n`;
+  sql += `  phone TEXT,\n  name TEXT,\n  order_count INTEGER,\n  total_spent NUMERIC,\n  last_order_id TEXT,\n  last_order_at TIMESTAMPTZ\n);\n\n`;
 
   if (customers.length > 0) {
-    sql += `INSERT INTO customers_export (phone, name, order_count, total_spent, last_order_at) VALUES\n`;
+    sql += `INSERT INTO customers_export (phone, name, order_count, total_spent, last_order_id, last_order_at) VALUES\n`;
     sql += customers.map(c =>
-      `('${esc(c.phone)}', '${esc(c.name)}', ${c.orderCount}, ${c.totalSpent}, '${c.lastOrderAt}')`
+      `('${esc(c.phone)}', '${esc(c.name)}', ${c.orderCount}, ${c.totalSpent}, '${esc(c.lastOrderId)}', '${c.lastOrderAt}')`
     ).join(',\n');
     sql += ';\n';
   }
