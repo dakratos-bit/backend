@@ -55,13 +55,12 @@ router.post('/orders', async (req, res) => {
     total,
   });
 
-  // Email is best-effort: if it fails (bad credentials, no internet, etc.)
-  // the order still succeeds — the customer already has their order ID on screen.
-  try {
-    await sendOrderConfirmation(order);
-  } catch (err) {
+  // Email is best-effort and fired without waiting on it — the customer
+  // already has their order ID on screen and shouldn't be stuck staring at
+  // a spinner just because Gmail/SMTP is slow or unreachable right now.
+  sendOrderConfirmation(order).catch(err => {
     console.warn('Order confirmation email failed to send:', err.message);
-  }
+  });
 
   res.status(201).json({ order });
 });
@@ -81,11 +80,9 @@ router.patch('/admin/orders/:id/status', requireAdmin, async (req, res) => {
   if (!order) return res.status(404).json({ error: 'Order not found.' });
 
   if (status === 'completed') {
-    try {
-      await sendOrderCompleted(order);
-    } catch (err) {
+    sendOrderCompleted(order).catch(err => {
       console.warn('Order completed email failed to send:', err.message);
-    }
+    });
   }
 
   res.json({ order });
@@ -167,6 +164,7 @@ router.get('/admin/customers', requireAdmin, async (req, res) => {
       map[o.phone] = {
         phone: o.phone,
         name: o.customerName,       // first one seen = most recent, since orders are newest-first
+        email: o.email || null,
         orderCount: 0,
         totalSpent: 0,
         lastOrderAt: o.createdAt,
@@ -195,9 +193,10 @@ router.get('/admin/customers/export', requireAdmin, async (req, res) => {
       map[o.phone] = {
         phone: o.phone,
         name: o.customerName,
+        email: o.email || null,
         orderCount: 0,
         totalSpent: 0,
-        lastOrderAt: o.createdAt,
+        lastOrderAt: o.createdAt.slice(0, 10), // date only, e.g. "2026-08-06" — time isn't needed here
         lastOrderId: o.id,
       };
     }
@@ -210,15 +209,17 @@ router.get('/admin/customers/export', requireAdmin, async (req, res) => {
 
   // Escapes single quotes so names like "O'Brien" don't break the SQL string.
   const esc = (v) => String(v).replace(/'/g, "''");
+  // Renders NULL (unquoted) for missing emails instead of the string 'null'.
+  const sqlVal = (v) => (v === null || v === undefined) ? 'NULL' : `'${esc(v)}'`;
 
   let sql = `-- The Baker NG — customers export\n-- Generated: ${new Date().toISOString()}\n\n`;
   sql += `CREATE TABLE IF NOT EXISTS customers_export (\n`;
-  sql += `  phone TEXT,\n  name TEXT,\n  order_count INTEGER,\n  total_spent NUMERIC,\n  last_order_id TEXT,\n  last_order_at TIMESTAMPTZ\n);\n\n`;
+  sql += `  phone TEXT,\n  name TEXT,\n  email TEXT,\n  order_count INTEGER,\n  total_spent NUMERIC,\n  last_order_id TEXT,\n  last_order_date DATE\n);\n\n`;
 
   if (customers.length > 0) {
-    sql += `INSERT INTO customers_export (phone, name, order_count, total_spent, last_order_id, last_order_at) VALUES\n`;
+    sql += `INSERT INTO customers_export (phone, name, email, order_count, total_spent, last_order_id, last_order_date) VALUES\n`;
     sql += customers.map(c =>
-      `('${esc(c.phone)}', '${esc(c.name)}', ${c.orderCount}, ${c.totalSpent}, '${esc(c.lastOrderId)}', '${c.lastOrderAt}')`
+      `('${esc(c.phone)}', '${esc(c.name)}', ${sqlVal(c.email)}, ${c.orderCount}, ${c.totalSpent}, '${esc(c.lastOrderId)}', '${c.lastOrderAt}')`
     ).join(',\n');
     sql += ';\n';
   }
