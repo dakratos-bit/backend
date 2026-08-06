@@ -1,24 +1,23 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const crypto = require('crypto');
+const cloudinary = require('cloudinary').v2;
 const { getMenu, createMenuItem, updateMenuItem, deleteMenuItem } = require('../db');
 const { requireAdmin } = require('../middleware/requireAdmin');
 
 const router = express.Router();
 
-// Photos get saved to disk with a random filename (keeps the original
-// extension so the browser still knows how to render it).
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', 'uploads'),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, crypto.randomBytes(12).toString('hex') + ext);
-  },
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+// Photos are held in memory only long enough to forward them to Cloudinary --
+// nothing gets written to Render's local disk, which is wiped on every
+// restart/redeploy. Cloudinary stores the file permanently and gives back a
+// full https URL, which is what gets saved as imageUrl.
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
@@ -27,6 +26,16 @@ const upload = multer({
     cb(null, true);
   },
 });
+
+function uploadToCloudinary(buffer) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: 'thebakerng' },
+      (err, result) => (err ? reject(err) : resolve(result))
+    );
+    stream.end(buffer);
+  });
+}
 
 // GET /api/menu — public, anyone browsing the site
 router.get('/menu', async (req, res) => {
@@ -48,7 +57,15 @@ router.post('/admin/menu', requireAdmin, (req, res, next) => {
   if (!priceNum || priceNum <= 0) return res.status(400).json({ error: 'Enter a valid price.' });
   if (!category || !category.trim()) return res.status(400).json({ error: 'Category is required.' });
 
-  const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+  let imageUrl = null;
+  if (req.file) {
+    try {
+      const result = await uploadToCloudinary(req.file.buffer);
+      imageUrl = result.secure_url;
+    } catch (err) {
+      return res.status(500).json({ error: 'Image upload failed. Try again.' });
+    }
+  }
 
   const item = await createMenuItem({
     name: name.trim(),
@@ -85,7 +102,15 @@ router.post('/admin/menu/banana-bread', requireAdmin, (req, res, next) => {
     return res.status(400).json({ error: 'Enter a price for at least one size.' });
   }
 
-  const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+  let imageUrl = null;
+  if (req.file) {
+    try {
+      const result = await uploadToCloudinary(req.file.buffer);
+      imageUrl = result.secure_url;
+    } catch (err) {
+      return res.status(500).json({ error: 'Image upload failed. Try again.' });
+    }
+  }
 
   const item = await createMenuItem({
     name: name.trim(),
@@ -135,7 +160,14 @@ router.put('/admin/menu/:id', requireAdmin, (req, res, next) => {
     updates.price = priceNum;
   }
 
-  if (req.file) updates.imageUrl = `/uploads/${req.file.filename}`;
+  if (req.file) {
+    try {
+      const result = await uploadToCloudinary(req.file.buffer);
+      updates.imageUrl = result.secure_url;
+    } catch (err) {
+      return res.status(500).json({ error: 'Image upload failed. Try again.' });
+    }
+  }
 
   const item = await updateMenuItem(req.params.id, updates);
   if (!item) return res.status(404).json({ error: 'Menu item not found.' });
