@@ -1,5 +1,5 @@
 const express = require('express');
-const { getMenu, createOrder, getOrders, updateOrderStatus } = require('../db');
+const { getMenu, createOrder, getOrders, updateOrderStatus, updateOrder } = require('../db');
 const { requireAdmin } = require('../middleware/requireAdmin');
 const { sendOrderConfirmation, sendOrderCompleted } = require('../mailer');
 
@@ -91,6 +91,42 @@ router.patch('/admin/orders/:id/status', requireAdmin, async (req, res) => {
   res.json({ order });
 });
 
+// PUT /api/admin/orders/:id — edit customer details and/or item quantities.
+// Prices are NOT re-validated against the current live menu here (unlike
+// checkout) since we're editing an already-placed order — the price the
+// customer was originally charged for each line is kept as-is unless the
+// admin removes that line entirely. Total is always recalculated server-side
+// from the submitted items, so it can never drift from what's actually listed.
+router.put('/admin/orders/:id', requireAdmin, async (req, res) => {
+  const { customerName, phone, email, fulfillment, address, items } = req.body;
+
+  if (!customerName || !customerName.trim()) return res.status(400).json({ error: 'Name is required.' });
+  if (!phone || !phone.trim()) return res.status(400).json({ error: 'Phone number is required.' });
+  if (!['pickup', 'delivery'].includes(fulfillment)) return res.status(400).json({ error: 'Choose pickup or delivery.' });
+  if (fulfillment === 'delivery' && (!address || !address.trim())) return res.status(400).json({ error: 'Delivery address is required.' });
+  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Order must have at least one item.' });
+
+  for (const line of items) {
+    if (!line.name || !(line.qty > 0) || !(line.price >= 0)) {
+      return res.status(400).json({ error: 'Each item needs a name, price, and quantity of at least 1.' });
+    }
+  }
+
+  const total = items.reduce((sum, l) => sum + l.price * l.qty, 0);
+
+  const order = await updateOrder(req.params.id, {
+    customerName: customerName.trim(),
+    phone: phone.trim(),
+    email: email ? email.trim() : null,
+    fulfillment,
+    address: fulfillment === 'delivery' ? address.trim() : null,
+    items,
+    total,
+  });
+  if (!order) return res.status(404).json({ error: 'Order not found.' });
+  res.json({ order });
+});
+
 // GET /api/admin/stats — basic sales stats
 router.get('/admin/stats', requireAdmin, async (req, res) => {
   const orders = await getOrders();
@@ -144,6 +180,50 @@ router.get('/admin/customers', requireAdmin, async (req, res) => {
 
   const customers = Object.values(map).sort((a, b) => b.orderCount - a.orderCount);
   res.json({ customers });
+});
+
+// GET /api/admin/customers/export — same aggregated data as above, but
+// returned as a downloadable .sql file (CREATE TABLE + INSERT statements)
+// instead of JSON, so the owner can back it up or import it elsewhere.
+router.get('/admin/customers/export', requireAdmin, async (req, res) => {
+  const orders = await getOrders();
+  const map = {};
+
+  orders.forEach(o => {
+    if (!map[o.phone]) {
+      map[o.phone] = {
+        phone: o.phone,
+        name: o.customerName,
+        orderCount: 0,
+        totalSpent: 0,
+        lastOrderAt: o.createdAt,
+      };
+    }
+    const c = map[o.phone];
+    c.orderCount += 1;
+    if (o.status !== 'cancelled') c.totalSpent += o.total;
+  });
+
+  const customers = Object.values(map).sort((a, b) => b.orderCount - a.orderCount);
+
+  // Escapes single quotes so names like "O'Brien" don't break the SQL string.
+  const esc = (v) => String(v).replace(/'/g, "''");
+
+  let sql = `-- The Baker NG — customers export\n-- Generated: ${new Date().toISOString()}\n\n`;
+  sql += `CREATE TABLE IF NOT EXISTS customers_export (\n`;
+  sql += `  phone TEXT,\n  name TEXT,\n  order_count INTEGER,\n  total_spent NUMERIC,\n  last_order_at TIMESTAMPTZ\n);\n\n`;
+
+  if (customers.length > 0) {
+    sql += `INSERT INTO customers_export (phone, name, order_count, total_spent, last_order_at) VALUES\n`;
+    sql += customers.map(c =>
+      `('${esc(c.phone)}', '${esc(c.name)}', ${c.orderCount}, ${c.totalSpent}, '${c.lastOrderAt}')`
+    ).join(',\n');
+    sql += ';\n';
+  }
+
+  res.setHeader('Content-Type', 'application/sql');
+  res.setHeader('Content-Disposition', `attachment; filename="customers-export-${new Date().toISOString().slice(0,10)}.sql"`);
+  res.send(sql);
 });
 
 // GET /api/orders/track — public order lookup for customers.
