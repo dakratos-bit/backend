@@ -9,7 +9,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {
+"dependencies": {
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -20,6 +20,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
     "cloudinary": "^1.41.0",
+    "axios": "^1.7.9",
     "server.js": "^1.0.0"
-  }
+}
 }
